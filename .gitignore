@@ -1,0 +1,9 @@
+# Dependencies
+node_modules/
+
+# Logs and generated artifacts
+log.txt
+outputs/
+
+# Environment overrides
+.env
