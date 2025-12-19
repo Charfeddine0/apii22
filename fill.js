@@ -89,24 +89,53 @@ async function collectResponse(page, opts, log) {
   const deadline = Date.now() + opts.timeoutSeconds * 1000;
 
   while (Date.now() < deadline) {
-    const responses = await page.$$eval(opts.responseSelectors.join(","), (els) => {
-      const textResponses = els.map((e) => e.innerText.trim()).filter(Boolean);
-      const images = [];
+    const responses = await page.evaluate((selectors) => {
+      const fallbackElements = Array.from(
+        document.querySelectorAll(selectors.join(","))
+      );
 
-      els.forEach((el) => {
-        el.querySelectorAll("img").forEach((img) => {
+      const assistantElements = Array.from(
+        document.querySelectorAll("[data-message-author-role='assistant']")
+      );
+
+      const textResponses = fallbackElements
+        .map((e) => e.innerText.trim())
+        .filter(Boolean);
+
+      const assistantTexts = assistantElements
+        .map((el) => el.innerText.trim())
+        .filter(Boolean);
+
+      const images = [];
+      const assistantImages = [];
+
+      const collectImages = (element, bucket) => {
+        element.querySelectorAll("img").forEach((img) => {
           const src = img.getAttribute("src");
           if (src) {
-            images.push(src);
+            bucket.push(src);
           }
         });
-      });
+      };
 
-      return { textResponses, images };
-    });
+      fallbackElements.forEach((el) => collectImages(el, images));
+      assistantElements.forEach((el) => collectImages(el, assistantImages));
 
-    if (responses.textResponses.length) {
-      finalText = responses.textResponses[responses.textResponses.length - 1];
+      return {
+        textResponses,
+        images,
+        assistantTexts,
+        assistantImages,
+      };
+    }, opts.responseSelectors);
+
+    const textCandidates =
+      responses.assistantTexts.length > 0
+        ? responses.assistantTexts
+        : responses.textResponses;
+
+    if (textCandidates.length) {
+      finalText = textCandidates[textCandidates.length - 1];
 
       if (finalText.length === lastLength) {
         stableCount += 1;
@@ -120,17 +149,22 @@ async function collectResponse(page, opts, log) {
       }
     }
 
-    if (responses.images.length) {
-      finalImages = responses.images;
+    const imageCandidates =
+      responses.assistantImages.length > 0
+        ? responses.assistantImages
+        : responses.images;
 
-      if (responses.images.length === lastImageCount) {
+    if (imageCandidates.length) {
+      finalImages = imageCandidates;
+
+      if (imageCandidates.length === lastImageCount) {
         imageStableCount += 1;
       } else {
         imageStableCount = 0;
-        lastImageCount = responses.images.length;
+        lastImageCount = imageCandidates.length;
       }
 
-      if (!responses.textResponses.length && imageStableCount >= opts.stableChecks) {
+      if (!textCandidates.length && imageStableCount >= opts.stableChecks) {
         break;
       }
     }
